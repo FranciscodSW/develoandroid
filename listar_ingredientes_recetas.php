@@ -25,28 +25,56 @@ if ($rec_id <= 0) {
 
 // Consulta para obtener detalles de la receta con sus ingredientes
 $sql = "SELECT 
-            r.REC_ID,
-            r.REC_NOMBRE,
-            r.REC_DESCRIPCION,
-            r.REC_PORCIONES,
-            r.REC_TIEMPO_PREPARACION,
-            r.REC_FECHACREACION,
-            r.Dificultad,
-            r.Calorias,
-            r.REC_ENLACEYOUTUBE,
-            r.REC_RC_ID,
-            ri.RI_ID,
-            ri.RI_DESC_CANTIDAD,
-            i.Ing_DESCRIPCION AS Nombre_Ingrediente,
-            i.Calorias AS Calorias_Ingrediente,
-            i.Precio_Estimado
-        FROM recetas r
-        INNER JOIN recetas_ingredientes ri ON r.REC_ID = ri.RI_REC_ID
-        INNER JOIN ingredientes i ON ri.RI_ING_ID = i.Ing_ID
-        WHERE r.REC_ID = ?
-          AND r.REC_ESTATUS = 1
-          AND ri.RI_ESTATUS = 1
-        ORDER BY ri.RI_ID";
+    r.REC_ID,
+    r.REC_NOMBRE,
+    r.REC_DESCRIPCION,
+    r.REC_PORCIONES,
+    r.REC_TIEMPO_PREPARACION,
+    r.REC_FECHACREACION,
+    r.Dificultad,
+    r.Calorias,
+    r.REC_ENLACEYOUTUBE,
+    r.FotoReceta,
+
+    r.REC_RC_ID,
+    rc.RC_DESCRIPCION AS REC_CATEGORIA,  -- 🔥 AQUÍ ESTÁ LA MAGIA
+
+    ri.RI_ID,
+    ri.RI_DESC_CANTIDAD,
+
+    i.Ing_DESCRIPCION AS Nombre_Ingrediente,
+    i.Calorias AS Calorias_Ingrediente,
+    i.Precio_Estimado,
+
+    cal.promedio,
+    cal.votos
+
+FROM recetas r
+
+INNER JOIN recetas_categoria rc 
+    ON r.REC_RC_ID = rc.RC_ID   -- 🔥 CLAVE
+
+INNER JOIN recetas_ingredientes ri 
+    ON r.REC_ID = ri.RI_REC_ID
+
+INNER JOIN ingredientes i 
+    ON ri.RI_ING_ID = i.Ing_ID
+
+LEFT JOIN (
+    SELECT 
+        CAL_REC_ID,
+        ROUND(AVG(CAL_CALIFICACION), 1) AS promedio,
+        COUNT(*) AS votos
+    FROM calificaciones
+    WHERE CAL_ESTATUS = 1
+    GROUP BY CAL_REC_ID
+) cal ON r.REC_ID = cal.CAL_REC_ID
+
+WHERE r.REC_ID = ?
+  AND r.REC_ESTATUS = 1
+  AND ri.RI_ESTATUS = 1
+
+ORDER BY ri.RI_ID;";
 
 $stmt = $conexion->prepare($sql);
 $stmt->bind_param("i", $rec_id);
@@ -69,6 +97,13 @@ while ($fila = $resultado->fetch_assoc()) {
             'Dificultad' => $fila['Dificultad'],
             'Calorias' => $fila['Calorias'],
             'REC_ENLACEYOUTUBE' => $fila['REC_ENLACEYOUTUBE'],
+            'FotoReceta' => $fila['FotoReceta'],
+
+            // 🔥 FIX IMPORTANTE
+            'promedio' => $fila['promedio'] ?? 0,
+            'votos' => $fila['votos'] ?? 0,
+            'tipo' => $fila['REC_CATEGORIA'],
+
             'REC_RC_ID' => $fila['REC_RC_ID'],
             'ingredientes' => []
         ];

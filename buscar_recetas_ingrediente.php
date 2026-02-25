@@ -60,12 +60,25 @@ $sql = "SELECT
             r.Calorias,
             r.REC_ENLACEYOUTUBE,
             r.REC_RC_ID,
+            r.FotoReceta,
+
+            ROUND(AVG(c.CAL_CALIFICACION), 1) AS promedio,
+            COUNT(c.CAL_ID) AS votos,
+
             COUNT(DISTINCT i.ING_ID) AS coincidencias
+
         FROM recetas r
+
         JOIN recetas_ingredientes ri ON r.REC_ID = ri.RI_REC_ID
         JOIN ingredientes i ON ri.RI_ING_ID = i.ING_ID
+
+        LEFT JOIN calificaciones c 
+            ON r.REC_ID = c.CAL_REC_ID
+            AND c.CAL_ESTATUS = 1
+
         WHERE r.REC_ESTATUS = 1
         AND r.REC_RC_ID = ?";
+
 
 // Parámetros dinámicos
 $conditions = [];
@@ -89,9 +102,7 @@ $sql .= " GROUP BY r.REC_ID
           HAVING coincidencias >= 1
           ORDER BY coincidencias DESC";
 
-// DEBUG opcional 😏
-// error_log($sql);
-// print_r($params);
+
 
 // Preparar statement
 $stmt = $conexion->prepare($sql);
