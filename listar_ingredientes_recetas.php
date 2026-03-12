@@ -34,10 +34,11 @@ $sql = "SELECT
     r.Dificultad,
     r.Calorias,
     r.REC_ENLACEYOUTUBE,
+    r.REC_DATOGOUMEET,
     r.FotoReceta,
 
     r.REC_RC_ID,
-    rc.RC_DESCRIPCION AS REC_CATEGORIA,  -- 🔥 AQUÍ ESTÁ LA MAGIA
+    rc.RC_DESCRIPCION AS REC_CATEGORIA,
 
     ri.RI_ID,
     ri.RI_DESC_CANTIDAD,
@@ -47,12 +48,26 @@ $sql = "SELECT
     i.Precio_Estimado,
 
     cal.promedio,
-    cal.votos
+    cal.votos,
+
+    c.COM_ID,
+    c.COM_COMENTARIO,
+    c.COM__FECHA,
+
+    cli.CLI_NOMBRE AS NombreCliente,
+    cli.FotoUsuario AS FotoCliente,
+
+    resp.COM_ID AS RESP_ID,
+    resp.COM_COMENTARIO AS RESPUESTA,
+    resp.COM__FECHA AS RESP_FECHA,
+
+    cli_resp.CLI_NOMBRE AS NombreRespuesta,
+    cli_resp.FotoUsuario AS FotoRespuesta
 
 FROM recetas r
 
 INNER JOIN recetas_categoria rc 
-    ON r.REC_RC_ID = rc.RC_ID   -- 🔥 CLAVE
+    ON r.REC_RC_ID = rc.RC_ID
 
 INNER JOIN recetas_ingredientes ri 
     ON r.REC_ID = ri.RI_REC_ID
@@ -70,11 +85,28 @@ LEFT JOIN (
     GROUP BY CAL_REC_ID
 ) cal ON r.REC_ID = cal.CAL_REC_ID
 
+LEFT JOIN comentarios c 
+    ON r.REC_ID = c.COM_REC_ID 
+    AND c.COM_ESTATUS = 1
+    AND c.COM_RESPUESTA_ID = 0
+
+LEFT JOIN clientes cli 
+    ON c.COM_CLI_ID = cli.CLI_ID
+    AND cli.CLI_ESTATUS = 1
+    
+LEFT JOIN comentarios resp 
+    ON c.COM_ID = resp.COM_RESPUESTA_ID
+    AND resp.COM_ESTATUS = 1
+
+LEFT JOIN clientes cli_resp
+    ON resp.COM_CLI_ID = cli_resp.CLI_ID
+    AND cli_resp.CLI_ESTATUS = 1
+
 WHERE r.REC_ID = ?
   AND r.REC_ESTATUS = 1
   AND ri.RI_ESTATUS = 1
 
-ORDER BY ri.RI_ID;";
+ORDER BY ri.RI_ID, c.COM__FECHA;";
 
 $stmt = $conexion->prepare($sql);
 $stmt->bind_param("i", $rec_id);
@@ -83,10 +115,12 @@ $resultado = $stmt->get_result();
 
 $receta = null;
 $ingredientes = [];
+$comentarios = [];
 
 while ($fila = $resultado->fetch_assoc()) {
+
+    // ✅ RECETA (solo una vez)
     if ($receta === null) {
-        // Solo tomamos los datos de la receta una vez
         $receta = [
             'REC_ID' => $fila['REC_ID'],
             'REC_NOMBRE' => $fila['REC_NOMBRE'],
@@ -97,39 +131,79 @@ while ($fila = $resultado->fetch_assoc()) {
             'Dificultad' => $fila['Dificultad'],
             'Calorias' => $fila['Calorias'],
             'REC_ENLACEYOUTUBE' => $fila['REC_ENLACEYOUTUBE'],
+            'REC_DATOGOUMEET' => $fila['REC_DATOGOUMEET'],
             'FotoReceta' => $fila['FotoReceta'],
-
-            // 🔥 FIX IMPORTANTE
             'promedio' => $fila['promedio'] ?? 0,
             'votos' => $fila['votos'] ?? 0,
             'tipo' => $fila['REC_CATEGORIA'],
-
-            'REC_RC_ID' => $fila['REC_RC_ID'],
-            'ingredientes' => []
+            'REC_RC_ID' => $fila['REC_RC_ID']
         ];
     }
 
-    // Agregar cada ingrediente al array
-    $ingredientes[] = [
-        'RI_ID' => $fila['RI_ID'],
-        'RI_DESC_CANTIDAD' => $fila['RI_DESC_CANTIDAD'],
-        'Nombre_Ingrediente' => $fila['Nombre_Ingrediente'],
-        'Calorias_Ingrediente' => $fila['Calorias_Ingrediente'],
-        'Precio_Estimado' => $fila['Precio_Estimado']
-    ];
+    // ✅ INGREDIENTES (evitar duplicados)
+    if ($fila['RI_ID'] && !isset($ingredientes[$fila['RI_ID']])) {
+        $ingredientes[$fila['RI_ID']] = [
+            'RI_ID' => $fila['RI_ID'],
+            'RI_DESC_CANTIDAD' => $fila['RI_DESC_CANTIDAD'],
+            'Nombre_Ingrediente' => $fila['Nombre_Ingrediente'],
+            'Calorias_Ingrediente' => $fila['Calorias_Ingrediente'],
+            'Precio_Estimado' => $fila['Precio_Estimado']
+        ];
+    }
+
+    // ✅ COMENTARIOS
+    if ($fila['COM_ID']) {
+
+        // Crear comentario si no existe
+        if (!isset($comentarios[$fila['COM_ID']])) {
+            $comentarios[$fila['COM_ID']] = [
+                'COM_ID' => $fila['COM_ID'],
+                'COM_COMENTARIO' => $fila['COM_COMENTARIO'],
+                'COM_FECHA' => $fila['COM__FECHA'],
+                'CLI_NOMBRE' => $fila['NombreCliente'],
+                'FotoUsuario' => $fila['FotoCliente'],
+                'respuestas' => []
+            ];
+        }
+
+        // ✅ RESPUESTAS
+        if ($fila['RESP_ID']) {
+
+            $resp_id = $fila['RESP_ID'];
+
+            if (!isset($comentarios[$fila['COM_ID']]['respuestas'][$resp_id])) {
+
+                $comentarios[$fila['COM_ID']]['respuestas'][$resp_id] = [
+                    'RESP_ID' => $fila['RESP_ID'],
+                    'RESPUESTA' => $fila['RESPUESTA'],
+                    'RESP_FECHA' => $fila['RESP_FECHA'],
+                    'CLI_NOMBRE' => $fila['NombreRespuesta'],
+                    'FotoUsuario' => $fila['FotoRespuesta']
+                ];
+            }
+        }
+    }
 }
 
 if ($receta === null) {
-    echo json_encode(['success' => false, 'error' => 'Receta no encontrada', 'recetas' => []]);
+    echo json_encode(['success' => false, 'error' => 'Receta no encontrada']);
     exit;
 }
 
-// Agregar los ingredientes a la receta
-$receta['ingredientes'] = $ingredientes;
+// Convertir mapas a arrays limpios
+$receta['ingredientes'] = array_values($ingredientes);
+foreach ($comentarios as &$comentario) {
 
+    if (!empty($comentario['respuestas'])) {
+        $comentario['respuestas'] = array_values($comentario['respuestas']);
+    } else {
+        $comentario['respuestas'] = [];
+    }
+}
 echo json_encode([
     'success' => true,
-    'receta' => $receta
+    'receta' => $receta,
+    'comentarios' => array_values($comentarios)
 ], JSON_UNESCAPED_UNICODE);
 
 $conexion->close();

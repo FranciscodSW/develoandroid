@@ -18,26 +18,25 @@ if ($conexion->connect_error) {
     exit;
 }
 
-// =========================
-// ✅ Leer JSON o POST (API híbrida 🔥)
-// =========================
 $data = json_decode(file_get_contents("php://input"), true);
 
 if (!$data) {
-    $data = $_POST;   // fallback elegante 😎
+    $data = $_POST;
 }
 
-// =========================
-// ✅ Obtener datos
-// =========================
-$correo = isset($data['correo']) ? trim($data['correo']) : '';
-$passwordUser = isset($data['password']) ? trim($data['password']) : '';
-$nombre = isset($data['nombre']) ? trim($data['nombre']) : '';
-$ip = isset($data['cli_primer_ip']) ? trim($data['cli_primer_ip']) : $_SERVER['REMOTE_ADDR'];
+$correo = trim($data['correo'] ?? '');
+$passwordUser = trim($data['password'] ?? '');
+$nombre = trim($data['nombre'] ?? '');
+$edad = intval($data['edad'] ?? 0);
+$nivel = intval($data['nivel'] ?? 1);
+$avatar = trim($data['avatar'] ?? '');
+$latitud = $data['latitud'] ?? null;
+$longitud = $data['longitud'] ?? null;
+$origen = trim($data['origen'] ?? '');
+$restricciones = $data['restricciones'] ?? [];
 
-// =========================
-// ✅ Validar campos
-// =========================
+$ip = $_SERVER['REMOTE_ADDR'];
+
 if (empty($correo) || empty($passwordUser) || empty($nombre)) {
     echo json_encode([
         'success' => false,
@@ -46,9 +45,6 @@ if (empty($correo) || empty($passwordUser) || empty($nombre)) {
     exit;
 }
 
-// =========================
-// ✅ Validar correo
-// =========================
 if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) {
     echo json_encode([
         'success' => false,
@@ -57,9 +53,6 @@ if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) {
     exit;
 }
 
-// =========================
-// ✅ Validar password
-// =========================
 if (strlen($passwordUser) < 8) {
     echo json_encode([
         'success' => false,
@@ -68,20 +61,6 @@ if (strlen($passwordUser) < 8) {
     exit;
 }
 
-// =========================
-// ✅ Validar nombre 🔥
-// =========================
-if (!preg_match("/^[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ ]*$/u", $nombre)) {
-    echo json_encode([
-        'success' => false,
-        'error' => 'Nombre inválido'
-    ]);
-    exit;
-}
-
-// =========================
-// ✅ Verificar duplicado
-// =========================
 $sqlCheck = "SELECT CLI_ID FROM clientes WHERE CLI_CORREO = ?";
 $stmtCheck = $conexion->prepare($sqlCheck);
 $stmtCheck->bind_param("s", $correo);
@@ -89,6 +68,7 @@ $stmtCheck->execute();
 $stmtCheck->store_result();
 
 if ($stmtCheck->num_rows > 0) {
+
     echo json_encode([
         'success' => false,
         'error' => 'El correo ya está registrado'
@@ -98,34 +78,66 @@ if ($stmtCheck->num_rows > 0) {
 
 $stmtCheck->close();
 
-// =========================
-// ✅ Encriptar password 🔥
-// =========================
 $passwordHash = password_hash($passwordUser, PASSWORD_DEFAULT);
 
-// =========================
-// ✅ Insertar usuario
-// =========================
-$sqlInsert = "INSERT INTO clientes 
-              (CLI_CORREO, CLI_CONTRASENIA, CLI_NOMBRE, CLI_PRIMER_IP, CLI_ESTATUS)
-              VALUES (?, ?, ?, ?, 1)";
+$conexion->begin_transaction();
 
-$stmtInsert = $conexion->prepare($sqlInsert);
-$stmtInsert->bind_param("ssss", $correo, $passwordHash, $nombre, $ip);
+try {
 
-if ($stmtInsert->execute()) {
+    $sqlInsert = "INSERT INTO clientes 
+    (CLI_CORREO, CLI_CONTRASENIA, CLI_NOMBRE, CLI_PRIMER_IP, CLI_ESTATUS, FotoUsuario, NIVEL, edad, latitud_cliente, longitud_cliente, Origen)
+    VALUES (?,?,?,?,1,?,?,?,?,?,?)";
+
+    $stmtInsert = $conexion->prepare($sqlInsert);
+
+    $stmtInsert->bind_param(
+        "sssssiidds",
+        $correo,
+        $passwordHash,
+        $nombre,
+        $ip,
+        $avatar,
+        $nivel,
+        $edad,
+        $latitud,
+        $longitud,
+        $origen
+    );
+
+    $stmtInsert->execute();
+
+    $idUsuario = $conexion->insert_id;
+
+    if (!empty($restricciones)) {
+
+        $sqlRestriccion = "INSERT INTO usuario_restricciones 
+        (id_usuario, id_restriccion) VALUES (?,?)";
+
+        $stmtRestriccion = $conexion->prepare($sqlRestriccion);
+
+        foreach ($restricciones as $idRestriccion) {
+
+            $stmtRestriccion->bind_param("ii", $idUsuario, $idRestriccion);
+            $stmtRestriccion->execute();
+        }
+
+        $stmtRestriccion->close();
+    }
+
+    $conexion->commit();
 
     echo json_encode([
         'success' => true,
-        'message' => 'Usuario registrado correctamente'
+        'usuario_id' => $idUsuario,
+        'message' => 'Registro completo'
     ], JSON_UNESCAPED_UNICODE);
-} else {
+} catch (Exception $e) {
+
+    $conexion->rollback();
 
     echo json_encode([
         'success' => false,
         'error' => 'Error al registrar usuario'
     ]);
 }
-
-$stmtInsert->close();
 $conexion->close();
