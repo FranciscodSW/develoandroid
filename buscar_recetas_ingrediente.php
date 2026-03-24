@@ -92,7 +92,6 @@ foreach ($ingredientes_lista as $ingrediente) {
     $param_types .= 's';
 }
 
-// ✅ SOLO agregar AND si hay condiciones
 if (!empty($conditions)) {
     $sql .= " AND (" . implode(' OR ', $conditions) . ")";
 }
